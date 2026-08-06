@@ -19,7 +19,14 @@ async function startServer() {
         return res.status(500).json({ error: "GEMINI_API_KEY environment variable is missing." });
       }
 
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({ 
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
       
       // Map the history to the format expected by the model
       const contents = history.map((msg: any) => ({
@@ -34,7 +41,7 @@ async function startServer() {
       });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.6-flash',
         contents,
         config: {
           systemInstruction: "You are Zara, a helpful, concise, and modern AI companion. Keep your responses crisp and helpful.",
