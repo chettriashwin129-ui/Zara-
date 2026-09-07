@@ -32,7 +32,7 @@ export async function initDb() {
         throw new Error('SQLite database disk image is malformed');
       }
     } catch (e) {
-      console.warn("SQLite database init error, re-creating database...", e);
+      console.log("Auto-recovering database from malformed state...");
       try { if (db) db.close(); } catch (_) {}
       deleteDbFiles(dbPath);
       db = new Database(dbPath, { timeout: 5000 });
@@ -144,7 +144,7 @@ export async function initDb() {
   try {
     runSchema();
   } catch (err: any) {
-    console.warn("SQLite database schema error. Re-creating database...", err);
+    console.log("Auto-recovering database schema...");
     try { if (db) db.close(); } catch (_) {}
     deleteDbFiles(dbPath);
     createAndInit();

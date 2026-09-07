@@ -28,6 +28,9 @@ interface DbConversation {
 export function ChatView() {
   const { data: conversations, create: createConv, remove: removeConv } = useApi<DbConversation>('conversations');
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [convSearchQuery, setConvSearchQuery] = useState('');
+  const [editingConvId, setEditingConvId] = useState<string | null>(null);
+  const [editingConvTitle, setEditingConvTitle] = useState('');
   const activeConvIdRef = useRef(activeConvId);
   useEffect(() => { activeConvIdRef.current = activeConvId; }, [activeConvId]);
   
@@ -66,6 +69,23 @@ useEffect(() => {
           setZaraTranscript(zaraText => {
             setInput(userText => {
               if (zaraText.trim() || userText.trim()) {
+                let currentConvId = activeConvIdRef.current;
+                
+                // If there's no active conversation, create one before saving messages
+                if (!currentConvId) {
+                  currentConvId = Date.now().toString();
+                  const title = (userText.trim() || zaraText.trim()).substring(0, 30) + '...';
+                  fetch('/api/data/conversations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: currentConvId, title })
+                  }).catch(console.error);
+                  
+                  // Using setTimeout to safely update state from within the setState callback
+                  setTimeout(() => setActiveConvId(currentConvId), 0);
+                  activeConvIdRef.current = currentConvId;
+                }
+
                 setMessages(prev => {
                   let newMsgs = [...prev];
                   const timestamp = new Date();
@@ -77,13 +97,12 @@ useEffect(() => {
                       timestamp
                     });
                     
-                    // Fire-and-forget save to DB
                     fetch('/api/data/messages', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
                         id: Date.now().toString() + '-u',
-                        conversation_id: activeConvIdRef.current,
+                        conversation_id: currentConvId,
                         role: 'user',
                         content: userText.trim()
                       })
@@ -98,13 +117,12 @@ useEffect(() => {
                       timestamp
                     });
                     
-                    // Fire-and-forget save to DB
                     fetch('/api/data/messages', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
                         id: Date.now().toString() + '-a',
-                        conversation_id: activeConvIdRef.current,
+                        conversation_id: currentConvId,
                         role: 'assistant',
                         content: zaraText.trim()
                       })
@@ -157,11 +175,10 @@ useEffect(() => {
     const current = voiceEngine.current.getState();
     if (current === 'idle' || current === 'error') {
       baseInputRef.current = input;
-      voiceEngine.current.startListening();
-    } else if (current === 'listening') {
+      const selectedLiveVoice = ttsEngine.settings.liveVoice || 'Aoede';
+      voiceEngine.current.startListening(selectedLiveVoice);
+    } else {
       voiceEngine.current.stopListening();
-    } else if (current === 'speaking') {
-      voiceEngine.current.stopSpeaking();
     }
   };
 
@@ -219,6 +236,26 @@ useEffect(() => {
     }
   }, [activeConvId]);
 
+  
+  const handleRenameSubmit = async (id: string) => {
+    if (editingConvTitle.trim()) {
+      try {
+        await fetch(`/api/conversations/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: editingConvTitle.trim() })
+        });
+        // We could refresh or mutate locally, but for simplicity we rely on next fetch or we can manually update:
+        const updated = conversations.map(c => c.id === id ? { ...c, title: editingConvTitle.trim() } : c);
+        // We'd need to mutate the useApi cache, but let's just trigger a reload if possible, or just let it be.
+        window.location.reload(); // Simple hammer
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    setEditingConvId(null);
+  };
+    
   const handleNewChat = () => {
     setActiveConvId(null);
   };
@@ -396,33 +433,58 @@ useEffect(() => {
       
       {/* Conversations Sidebar */}
       <div className="w-64 border-r border-white/5 bg-[#18181B]/50 flex flex-col hidden md:flex">
-        <div className="p-4 border-b border-white/5">
+        <div className="p-4 border-b border-white/5 space-y-3">
           <button 
             onClick={handleNewChat}
             className="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 text-white px-4 py-2 rounded-xl transition-colors text-sm font-medium"
           >
             <Plus className="w-4 h-4" /> New Chat
           </button>
+          <input 
+            type="text" 
+            placeholder="Search conversations..." 
+            value={convSearchQuery}
+            onChange={(e) => setConvSearchQuery(e.target.value)}
+            className="w-full bg-white/5 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-[#A1A1AA] outline-none border border-transparent focus:border-[#7C3AED]/50"
+          />
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-1">
-          {conversations.map(conv => (
+          {conversations.filter(c => c.title.toLowerCase().includes(convSearchQuery.toLowerCase())).map(conv => (
             <div 
               key={conv.id}
-              onClick={() => setActiveConvId(conv.id)}
+              onClick={() => { if (editingConvId !== conv.id) setActiveConvId(conv.id); }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer group transition-colors ${
                 activeConvId === conv.id ? 'bg-[#7C3AED]/20 text-[#7C3AED]' : 'hover:bg-white/5 text-[#A1A1AA] hover:text-white'
               }`}
             >
-              <div className="flex items-center gap-3 overflow-hidden">
+              <div className="flex items-center gap-3 overflow-hidden flex-1">
                 <MessageSquare className="w-4 h-4 flex-shrink-0" />
-                <span className="text-sm truncate">{conv.title}</span>
+                {editingConvId === conv.id ? (
+                  <input
+                    type="text"
+                    autoFocus
+                    value={editingConvTitle}
+                    onChange={(e) => setEditingConvTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleRenameSubmit(conv.id);
+                      if (e.key === 'Escape') setEditingConvId(null);
+                    }}
+                    onBlur={() => handleRenameSubmit(conv.id)}
+                    className="bg-black/50 text-white text-sm w-full outline-none border-b border-[#7C3AED]"
+                  />
+                ) : (
+                  <span className="text-sm truncate" onDoubleClick={() => { setEditingConvId(conv.id); setEditingConvTitle(conv.title); }}>{conv.title}</span>
+                )}
               </div>
-              <button 
-                onClick={(e) => handleDeleteChat(conv.id, e)}
-                className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-all rounded-md"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              
+              {!editingConvId && (
+                <button 
+                  onClick={(e) => handleDeleteChat(conv.id, e)}
+                  className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-all rounded-md flex-shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -620,6 +682,7 @@ useEffect(() => {
                 <div>Chunks sent: <span className="text-white font-bold">{diagnostics?.audioChunksSent || 0}</span></div>
                 <div>Server msgs: <span className="text-white font-bold">{diagnostics?.serverMessagesReceived || 0}</span></div>
                 <div>Audio responses: <span className="text-white font-bold">{diagnostics?.audioResponsesReceived || 0}</span></div>
+                <div>Voice model: <span className="text-purple-400 font-bold">{ttsEngine.settings.liveVoice || 'Aoede'} (Female)</span></div>
                 <div>State: <span className="text-purple-400 font-bold">{diagnostics?.recognitionState || voiceState.toUpperCase()}</span></div>
               </div>
 

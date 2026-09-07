@@ -141,6 +141,7 @@ registerTool({
   }
 });
 
+
 export async function executeAction(name: string, params: any) {
   const tool = ToolRegistry[name];
   if (!tool) throw new Error(`Tool ${name} not found`);

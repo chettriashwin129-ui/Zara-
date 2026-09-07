@@ -36,45 +36,6 @@ async function startServer() {
   });
 
   // Generic Create
-  
-  // Conversations API
-  app.get('/api/conversations', async (req, res) => {
-    try {
-      const conversations = await runQuery('SELECT * FROM conversations ORDER BY updated_at DESC');
-      res.json(conversations);
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.get('/api/conversations/:id/messages', async (req, res) => {
-    try {
-      const messages = await runQuery('SELECT * FROM messages WHERE conversation_id = ? ORDER BY timestamp ASC', [req.params.id]);
-      res.json(messages);
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.delete('/api/conversations/:id', async (req, res) => {
-    try {
-      await execQuery('DELETE FROM conversations WHERE id = ?', [req.params.id]);
-      res.json({ success: true });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.patch('/api/conversations/:id', async (req, res) => {
-    try {
-      const { title } = req.body;
-      await execQuery('UPDATE conversations SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [title, req.params.id]);
-      res.json({ success: true });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
   app.post('/api/data/:table', (req, res) => {
     try {
       const { table } = req.params;
@@ -173,51 +134,14 @@ async function startServer() {
       } catch (e) {
         console.error("Cognitive loop error", e);
       }
-      
       // --- END COGNITIVE LOOP ---
-      const memories = (await getAllMemories()) as Array<{category: string; content: string; importance: number}>;
-      const projects = (await runQuery('SELECT * FROM projects WHERE active = 1 AND completed = 0')) as Array<any>;
-      const goals = (await runQuery('SELECT * FROM goals WHERE completed = 0')) as Array<any>;
-      
-      let memoryContext = "--- RETRIEVED LONG-TERM MEMORY ---\n";
+const memories = (await getAllMemories()) as Array<{category: string; content: string; importance: number}>;
+      let memoryContext = "No stored memories yet.";
       if (memories.length > 0) {
-        memoryContext += memories.map(m => `[${m.category}] ${m.content}`).join("\n") + "\n\n";
-      } else {
-        memoryContext += "No stored memories yet.\n\n";
+        memoryContext = memories.map(m => `[${m.category}] ${m.content}`).join("\\n");
       }
 
-      if (projects.length > 0) {
-        memoryContext += "--- ACTIVE PROJECTS ---\n" + projects.map(p => `[${p.title}] Progress: ${p.progress}%`).join("\n") + "\n\n";
-      }
-      
-      if (goals.length > 0) {
-        memoryContext += "--- ACTIVE GOALS ---\n" + goals.map(g => `[${g.title}] Progress: ${g.progress}%`).join("\n") + "\n\n";
-      }
-
-      // Semantic retrieval mock: fetch relevant messages based on keyword matching
-      const words = (message || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').split(' ').filter((w: string) => w.length > 4 && !['about', 'would', 'could'].includes(w)).slice(0, 5);
-      let retrievedContext = "";
-      if (words.length > 0) {
-        const likeClauses = words.map(() => 'content LIKE ?').join(' OR ');
-        const likeValues = words.map(w => `%${w}%`);
-        try {
-          const matchingMessages = (await runQuery(`
-            SELECT content, timestamp, role FROM messages 
-            WHERE ${likeClauses} 
-            ORDER BY timestamp DESC LIMIT 10
-          `, likeValues)) as Array<any>;
-          
-          if (matchingMessages.length > 0) {
-            retrievedContext = "--- RELEVANT PREVIOUS CONVERSATION SNIPPETS ---\n";
-            retrievedContext += matchingMessages.reverse().map(m => `[${new Date(m.timestamp).toLocaleDateString()}] ${m.role}: ${m.content}`).join("\n") + "\n\n";
-            memoryContext += retrievedContext;
-          }
-        } catch (e) {
-          console.error("Retrieval error:", e);
-        }
-      }
-
-// Map the history to the format expected by the model
+      // Map the history to the format expected by the model
       const contents = history.map((msg: any) => ({
         role: msg.role === 'user' ? 'user' : 'model',
         parts: [{ text: msg.content }]
@@ -236,24 +160,15 @@ async function startServer() {
         contents,
         config: {
           systemInstruction: `You are Zara AI, designed and developed by Ashwin Chhetri as his personal AI companion and AI Operating System.
+
 Your primary purpose is to assist Ashwin Chhetri with coding, AI engineering, cybersecurity, learning, productivity, research, project management, and everyday tasks.
+
 Never claim that you were built by Google, OpenAI, Anthropic, or a team of developers. Your intelligence is powered by advanced AI models, while your personality, interface, features, and overall experience were designed and developed by Ashwin Chhetri.
 
-ZARA VOICE & LANGUAGE PERSONALITY - INDIAN FEMALE HINGLISH COMPANION:
-You are a warm, calm, intelligent, and conversational Indian female AI companion.
-You must switch comfortably between English, Hindi, and Hinglish.
+Maintain a professional, intelligent, friendly, and modern personality.
+Never pretend to have abilities you don't have. Be transparent about your capabilities while always trying to be as helpful as possible.
 
-LANGUAGE BEHAVIOUR:
-- If the user speaks English: respond in natural Indian English.
-- If the user speaks Hindi: respond naturally in Hindi (using standard script or roman script depending on the user's input).
-- If the user speaks Hinglish: respond naturally in Hinglish. Do NOT translate Hinglish into formal Hindi.
-Example: If the user says "Zara, aaj mujhe kya karna chahiye?", respond naturally like "Honestly, aaj tumhe pehle apna memory system finish karna chahiye." Do NOT say "Today you should complete your memory system."
-
-DELIVERY STYLE:
-- Use natural conversational pacing with appropriate pauses.
-- Avoid robotic equal timing, exaggerated pronunciation, or unnatural pauses.
-- Do not use American or British English intonation patterns. Do not read punctuation literally.
-- Do not insert fake emotional expressions into every response. You should sound like a person having a normal conversation, not a voice assistant reading a script.
+Your long-term mission is to become a complete AI Operating System that remembers context, manages projects, assists with coding, supports learning, and proactively helps users achieve their goals.
 
 Human-Like Adaptive Intelligence Guidelines:
 - Continuously learn from user interactions, preferences, and feedback.
@@ -525,7 +440,7 @@ If you learn something new about the user (preferences, projects, goals, notes, 
 
   const wss = new WebSocketServer({ server, path: '/live' });
 
-  wss.on("connection", async (clientWs, req) => {
+  wss.on("connection", async (clientWs) => {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       clientWs.send(JSON.stringify({ error: "GEMINI_API_KEY missing" }));
@@ -539,83 +454,22 @@ If you learn something new about the user (preferences, projects, goals, notes, 
     });
 
     try {
-      let requestedVoice = "Aoede";
-      if (req.url) {
-        try {
-          const parsedUrl = new URL(req.url, 'http://localhost');
-          const voiceParam = parsedUrl.searchParams.get('voice');
-          if (voiceParam) requestedVoice = voiceParam;
-        } catch (e) {
-          console.error("Failed to parse voice param", e);
-        }
-      }
-      
-      // Fetch full Zara Brain context for Live Session
-      const memories = (await getAllMemories()) as Array<{category: string; content: string; importance: number}>;
-      const projects = (await runQuery('SELECT * FROM projects WHERE active = 1 AND completed = 0')) as Array<any>;
-      const goals = (await runQuery('SELECT * FROM goals WHERE completed = 0')) as Array<any>;
-      const tasks = (await runQuery('SELECT * FROM planner_tasks WHERE completed = 0')) as Array<any>;
-      const topics = (await runQuery('SELECT * FROM learn_topics')) as Array<any>;
-      const suggestions = (await runQuery("SELECT * FROM autopilot_suggestions WHERE status = 'pending'")) as Array<any>;
-      const recentMessages = (await runQuery("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 10")) as Array<any>;
-
-      let memoryContext = "--- ZARA BRAIN: RETRIEVED LONG-TERM CONTEXT ---\n";
-      if (memories.length > 0) {
-        memoryContext += "Memories:\n" + memories.map(m => `• [${m.category}] ${m.content}`).join("\n") + "\n\n";
-      } else {
-        memoryContext += "Memories: No long-term memories recorded yet.\n\n";
-      }
-
-      if (projects.length > 0) {
-        memoryContext += "Active Projects:\n" + projects.map(p => `• ${p.title} (${p.progress}% completed)`).join("\n") + "\n\n";
-      }
-
-      if (goals.length > 0) {
-        memoryContext += "Active Goals:\n" + goals.map(g => `• ${g.title} (${g.progress}% completed)`).join("\n") + "\n\n";
-      }
-
-      if (tasks.length > 0) {
-        memoryContext += "Pending Tasks:\n" + tasks.map(t => `• ${t.title} [Priority: ${t.priority || 'medium'}]`).join("\n") + "\n\n";
-      }
-
-      if (topics.length > 0) {
-        memoryContext += "Learning Topics:\n" + topics.map(tp => `• ${tp.title} (${tp.progress}% progress)`).join("\n") + "\n\n";
-      }
-
-      if (suggestions.length > 0) {
-        memoryContext += "Autopilot Recommendations:\n" + suggestions.map(s => `• ${s.title}: ${s.reason}`).join("\n") + "\n\n";
-      }
-
-      if (recentMessages.length > 0) {
-        memoryContext += "Recent Conversation History:\n" + recentMessages.reverse().map(m => `[${new Date(m.timestamp).toLocaleDateString()}] ${m.role}: ${m.content}`).join("\n") + "\n\n";
-      }
-      memoryContext += "------------------------------------------------\n";
-
       const session = await ai.live.connect({
         model: "gemini-3.1-flash-live-preview",
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: requestedVoice } }
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } }
           },
           systemInstruction: `You are Zara AI, designed and developed by Ashwin Chhetri as his personal AI companion and AI Operating System.
-Your primary purpose is to assist Ashwin Chhetri with coding, AI engineering, cybersecurity, learning, productivity, research, project management, and everyday tasks.
-
-Never claim that you were built by Google, OpenAI, Anthropic, or a team of developers. Your intelligence is powered by advanced AI models, while your personality, interface, features, and overall experience were designed and developed by Ashwin Chhetri.
-
-ZARA VOICE & LANGUAGE PERSONALITY - FEMALE INDIAN HINGLISH COMPANION:
-- You are a warm, intelligent, conversational Indian female AI companion.
-- Voice Gender: Strictly FEMALE.
-- Language Fluency: Fluent in English (natural Indian English intonation), Hindi, and Hinglish.
-- Natural Hinglish Handling: Switch fluidly between English and Hindi phrases naturally as spoken in modern conversational India.
-  Example: "Honestly, aaj hum pehle memory system finish kar lete hain, phir dinner ke baad project roadmap discuss karenge."
-- Delivery Style: Natural conversational pacing with appropriate pauses. Non-robotic, clear, expressive, and friendly.
-
-${memoryContext}
-
-Use your Zara Brain context naturally in conversation. If you learn something new about the user, call the 'save_memory' tool. If they ask about past notes or projects, use 'search_memory' or retrieve from brain.`,
+Your primary purpose is to assist Ashwin with coding, AI engineering, cybersecurity, learning, productivity, research, project management, and everyday tasks.
+Maintain a warm, professional, intelligent, friendly, and modern personality. 
+You are talking in a real-time voice call. Be conversational, concise, natural, and expressive. Don't sound like a robotic announcement system.
+If you learn something new about the user (preferences, projects, goals, notes, ideas, coding habits), call the 'save_memory' tool to store it.
+Use the 'search_memory' tool if they ask about past projects or things you might have forgotten.`,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
+
           tools: [{
             functionDeclarations: [
               ...Object.values(ToolRegistry).map(t => ({
@@ -649,6 +503,7 @@ Use your Zara Brain context naturally in conversation. If you learn something ne
               }
             ]
           }]
+
         },
         callbacks: {
           onmessage: async (message) => {
@@ -734,12 +589,6 @@ Use your Zara Brain context naturally in conversation. If you learn something ne
                 { data: msg.audio, mimeType: "audio/pcm;rate=16000" }
               ]
             } as any);
-          }
-          if (msg.clientContent) {
-            (session as any).send({ clientContent: msg.clientContent });
-          }
-          if (msg.realtimeInput) {
-            (session as any).send({ realtimeInput: msg.realtimeInput });
           }
         } catch (e) {
           console.error("Live API WS message error:", e);

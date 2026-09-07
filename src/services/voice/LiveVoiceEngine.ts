@@ -70,7 +70,8 @@ export class LiveVoiceEngine {
         // Hardware mute
         this.onError("Zara couldn't access the voice stream. Please try again.");
         this.stopListening();
-      }
+      },
+      () => this.getState()
     );
 
     this.session = new LiveSessionManager({
@@ -85,7 +86,7 @@ export class LiveVoiceEngine {
         }
       },
       onAudio: (base64) => {
-        this.activity.resetVadTimer(this.state === 'listening' || this.state === 'processing');
+        this.activity.resetVadTimer();
         this.lastEvent = 'receiving-audio';
         this.setState('speaking');
         this.playback.playAudioChunk(base64);
@@ -94,6 +95,7 @@ export class LiveVoiceEngine {
         this.lastEvent = 'interrupted';
         this.playback.stopPlayback();
         this.setState('listening');
+        this.activity.resetVadTimer();
       },
       onTurnComplete: () => {
         this.lastEvent = 'turnComplete';
@@ -101,12 +103,12 @@ export class LiveVoiceEngine {
       },
       onTranscript: (text, isModel) => {
         this.lastTranscript = text;
-        this.activity.resetVadTimer(this.state === 'listening' || this.state === 'processing');
+        this.activity.resetVadTimer();
         this.notifyDiagnostics();
         this.onTranscript(text, isModel);
       },
       onInterimTranscript: (text) => {
-        this.activity.resetVadTimer(this.state === 'listening' || this.state === 'processing');
+        this.activity.resetVadTimer();
         this.onInterim(text);
       },
       onError: (msg) => {
@@ -114,6 +116,12 @@ export class LiveVoiceEngine {
         this.onError(msg);
         this.setState('error');
         this.stopListening();
+      },
+      onClose: () => {
+        this.lastEvent = 'ws-closed';
+        if (this.state !== 'idle' && this.state !== 'error') {
+          this.setState('idle');
+        }
       }
     });
 
@@ -145,7 +153,7 @@ export class LiveVoiceEngine {
     });
   }
 
-  async startListening() {
+  async startListening(voiceName: string = 'Aoede') {
     this.setState('processing');
     this.lastEvent = 'connecting';
     this.audioChunksCaptured = 0;
@@ -159,6 +167,13 @@ export class LiveVoiceEngine {
       if (this.session.isConnected()) {
         const { base64, maxAmp } = AudioEncoder.encodeFloat32ToPCM16Base64(inputData);
         this.activity.processAmplitude(maxAmp);
+        
+        // If user speaks while Zara is speaking, immediately interrupt playback locally
+        if (this.state === 'speaking' && maxAmp > 0.05) {
+          this.playback.stopPlayback();
+          this.setState('listening');
+        }
+        
         this.session.sendAudioChunk(base64);
       }
     });
@@ -166,13 +181,13 @@ export class LiveVoiceEngine {
     this.micPermission = permission;
     if (permission === 'DENIED') {
       this.lastError = 'mic-denied';
-      this.onError("Microphone access denied. Please allow microphone permissions.");
+      this.onError("Microphone access denied. Please allow microphone permissions in browser.");
       this.setState('error');
       return;
     }
 
-    this.session.connect();
-    this.activity.resetVadTimer(true);
+    this.session.connect(voiceName);
+    this.activity.resetVadTimer();
   }
 
   getState(): VoiceState {

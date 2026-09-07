@@ -6,6 +6,7 @@ export interface LiveSessionEvents {
   onTranscript: (text: string, isModel: boolean) => void;
   onInterimTranscript: (text: string) => void;
   onError: (msg: string) => void;
+  onClose?: () => void;
 }
 
 export class LiveSessionManager {
@@ -20,13 +21,13 @@ export class LiveSessionManager {
     this.events = events;
   }
 
-  connect() {
+  connect(voiceName: string = 'Aoede') {
     this.serverMessagesReceived = 0;
     this.audioResponsesReceived = 0;
     this.audioChunksSent = 0;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.ws = new WebSocket(`${protocol}//${window.location.host}/live`);
+    this.ws = new WebSocket(`${protocol}//${window.location.host}/live?voice=${encodeURIComponent(voiceName)}`);
 
     this.ws.onopen = () => {
       this.events.onOpen();
@@ -85,20 +86,15 @@ export class LiveSessionManager {
     };
 
     this.ws.onclose = () => {
-      // closed
+      if (this.events.onClose) {
+        this.events.onClose();
+      }
     };
   }
   
   sendAudioChunk(base64Data: string) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        realtimeInput: {
-          mediaChunks: [{
-            mimeType: "audio/pcm;rate=16000",
-            data: base64Data
-          }]
-        }
-      }));
+      this.ws.send(JSON.stringify({ audio: base64Data }));
       this.audioChunksSent++;
     }
   }

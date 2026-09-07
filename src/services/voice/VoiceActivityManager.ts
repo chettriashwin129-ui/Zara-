@@ -5,16 +5,19 @@ export class VoiceActivityManager {
   
   private onSilenceTimeout: () => void;
   private onHardwareMute: () => void;
+  private getState: () => string;
 
-  constructor(onSilenceTimeout: () => void, onHardwareMute: () => void) {
+  constructor(onSilenceTimeout: () => void, onHardwareMute: () => void, getState: () => string) {
     this.onSilenceTimeout = onSilenceTimeout;
     this.onHardwareMute = onHardwareMute;
+    this.getState = getState;
   }
 
-  resetVadTimer(isListeningOrProcessing: boolean) {
+  resetVadTimer() {
     if (this.vadSilenceTimer) clearTimeout(this.vadSilenceTimer);
     this.vadSilenceTimer = setTimeout(() => {
-      if (isListeningOrProcessing) {
+      const state = this.getState();
+      if (state === 'listening' || state === 'processing') {
         this.onSilenceTimeout();
       }
     }, 20000); // 20 seconds of no transcript or activity
@@ -23,7 +26,7 @@ export class VoiceActivityManager {
   processAmplitude(maxAmp: number) {
     if (maxAmp === 0) {
       this.zeroVolumeChunks++;
-      if (this.zeroVolumeChunks > 40 && !this.silenceTimeoutDetected) { // 40 chunks * 250ms = 10 seconds
+      if (this.zeroVolumeChunks > 80 && !this.silenceTimeoutDetected) { // 80 chunks * 250ms = 20 seconds
         this.silenceTimeoutDetected = true;
         this.onHardwareMute();
       }
